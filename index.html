@@ -2,17 +2,29 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Arena 2D Online - Dash + Espada</title>
+<title>Arena 2D - Dash Separado + Espada</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
   body{background:#111;font-family:Arial;overflow:hidden;color:#fff;}
   canvas{background:#222;display:block;}
-  #menu{position:fixed;inset:0;background:#000c;display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;gap:20px;}
+  #menu{position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:1000;gap:20px;}
   input, button{padding:15px 30px;font-size:1.5em;border-radius:12px;border:none;}
   button{background:#00ff88;color:#000;font-weight:bold;cursor:pointer;}
   button:hover{background:#00cc66;}
   #roomCode{font-size:3em;font-weight:bold;color:#0ff;letter-spacing:10px;}
   #status{color:#ffcc00;margin-top:20px;font-size:1.3em;}
+  #hud{position:absolute;top:10px;left:10px;right:10px;z-index:10;display:flex;justify-content:space-between;align-items:center;pointer-events:none;display:none;}
+  .player-info{background:rgba(0,0,0,0.7);padding:12px;border-radius:8px;min-width:230px;}
+  .health-bar{width:170px;height:20px;background:#333;border:2px solid #fff;margin:8px 0;overflow:hidden;}
+  .health{height:100%;background:#0f0;transition:width .3s;}
+  #shop-btn{background:#00ccff;padding:14px 28px;border-radius:10px;font-weight:bold;cursor:pointer;pointer-events:all;font-size:1.1em;}
+  #shop-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.95);display:none;justify-content:center;align-items:center;z-index:100;}
+  #shop{background:#222;padding:35px;border-radius:15px;border:4px solid #0ff;max-width:520px;text-align:center;}
+  #player-coins{color:gold;font-size:1.2em;margin:10px 0;}
+  .weapon{background:#333;margin:20px 0;padding:20px;border-radius:12px;cursor:pointer;transition:.2s;}
+  .weapon:hover{background:#444;transform:scale(1.05);}
+  .price{font-weight:bold;font-size:1.3em;}
+  button{margin-top:20px;padding:12px 30px;font-size:1.1em;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -30,198 +42,337 @@
 
 <canvas id="c"></canvas>
 
-<!-- Seu HUD e loja permanecem iguais -->
-<div id="hud" style="display:none">
+<div id="hud">
   <div class="player-info">
-    <div id="playerName">Jogador</div>
+    <div>J1: WASD + Espaço (ataque) + C (dash)</div>
     <div class="health-bar"><div id="h1" class="health"></div></div>
     <div id="c1">0 moedas</div>
   </div>
-  <div id="shop-btn">LOJA (F)</div>
+  <div id="shop-btn">LOJA J1(F) / J2(G)</div>
   <div class="player-info">
-    <div>Inimigo</div>
+    <div>J2: Setas + Enter (ataque) + L (dash)</div>
     <div class="health-bar"><div id="h2" class="health"></div></div>
     <div id="c2">0 moedas</div>
   </div>
 </div>
 
-<!-- Loja igualzinha a sua -->
 <div id="shop-overlay">
   <div id="shop">
-    <h2 id="shop-title">LOJA</h2>
-    <div id="player-coins">0 moedas</div>
-    <p>Pressione 1,2,3,4 para comprar/selecionar</p>
-    <div class="weapon" data-w="pistol"><h3>1 → Pistola</h3><p>Dano: 20</p><span class="price">Grátis</span></div>
-    <div class="weapon" data-w="shotgun"><h3>2 → Escopeta</h3><p>5 tiros</p><span class="price">150 moedas</span></div>
-    <div class="weapon" data-w="machinegun"><h3>3 → Metralhadora</h3><p>Cadência altíssima</p><span class="price">300 moedas</span></div>
-    <div class="weapon" data-w="espada"><h3>4 → Espada Laser</h3><p>Giro + Dash</p><span class="price">100 moedas</span></div>
+    <h2 id="shop-title">LOJA DO JOGADOR</h2>
+    <div id="player-coins"></div>
+    <p>Pressione 1,2,3,4 para selecionar/comprar</p>
+    <div class="weapon" data-w="pistol">
+      <h3>1 → Pistola</h3>
+      <p>Dano: 20 • Cadência normal</p>
+      <span class="price">Grátis</span>
+    </div>
+    <div class="weapon" data-w="shotgun">
+      <h3>2 → Escopeta</h3>
+      <p>5 tiros • Dano total 40</p>
+      <span class="price">150 moedas</span>
+    </div>
+    <div class="weapon" data-w="machinegun">
+      <h3>3 → Metralhadora</h3>
+      <p>Dano 6 • Cadência altíssima</p>
+      <span class="price">300 moedas</span>
+    </div>
+    <div class="weapon" data-w="espada">
+      <h3>4 → Espada Laser</h3>
+      <p>Ataque giro + Dash (C/L 5s CD)</p>
+      <span class="price">100 moedas</span>
+    </div>
     <button onclick="closeShop()">Fechar (ESC)</button>
   </div>
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-// ==================== CONEXÃO SOCKET.IO ====================
+// ==================== SOCKET.IO ====================
 const socket = io();
-let myId = null;
-let isHost = false;
-let roomCode = null;
+let roomCode = null, gameStarted = false;
 
 // Menu
-document.getElementById('createBtn').onclick = () => {
-  socket.emit('createRoom');
-};
-
+document.getElementById('createBtn').onclick = () => socket.emit('createRoom');
 document.getElementById('joinBtn').onclick = () => {
   const code = document.getElementById('codeInput').value.toUpperCase().trim();
   if (code.length !== 5) return alert('Código deve ter 5 letras!');
   socket.emit('joinRoom', code);
 };
 
-socket.on('roomCreated', (code) => {
+socket.on('roomCreated', code => {
   roomCode = code;
-  isHost = true;
   document.getElementById('roomCode').textContent = code;
   document.getElementById('status').textContent = 'Compartilhe o código!';
 });
 
-socket.on('waiting', () => {
-  document.getElementById('status').textContent = 'Aguardando oponente...';
-});
+socket.on('waiting', () => document.getElementById('status').textContent = 'Aguardando oponente...');
 
-socket.on('startGame', (data) => {
-  myId = socket.id;
-  isHost = data.p1 === socket.id;
+socket.on('startGame', () => {
+  gameStarted = true;
   document.getElementById('menu').style.display = 'none';
   document.getElementById('hud').style.display = 'flex';
-  document.getElementById('playerName').textContent = isHost ? 'J1 (Você)' : 'J2 (Você)';
-  initGame();
+  reset(); // Inicia o jogo com contagem regressiva
+  loop();
 });
 
 socket.on('opponentLeft', () => {
-  alert('O oponente saiu da sala!');
+  alert('Oponente saiu da sala!');
   location.reload();
 });
 
 socket.on('error', msg => alert(msg));
 
-// ==================== SEU JOGO (adaptado) ====================
+// ==================== DADOS SALVOS (seu original) ====================
+let saveStr = localStorage.getItem('arena2d') || '{"p1":{"coins":0,"weapon":"pistol","owned":["pistol"]},"p2":{"coins":0,"weapon":"pistol","owned":["pistol"]}}';
+let save = JSON.parse(saveStr);
+['p1','p2'].forEach(id => {
+  if (!save[id]) save[id] = {coins:0, weapon:'pistol', owned:['pistol']};
+  else if (!save[id].owned) save[id].owned = ['pistol'];
+});
+localStorage.setItem('arena2d', JSON.stringify(save));
+
+// ==================== ARMAS (seu original 100%) ====================
+const weapons = {
+  pistol:     {dmg:20, cd:20, speed:12, color:'#fff',      fire:p=>bullets.push(bullet(p,0))},
+  shotgun:    {dmg:8,  cd:40, speed:10, color:'#ff8800',   fire:p=>[-0.25,-0.12,0,0.12,0.25].forEach(a=>bullets.push(bullet(p,a)))},
+  machinegun: {dmg:6,  cd:5,  speed:14, color:'#00ffff',   fire:p=>bullets.push(bullet(p,(Math.random()-0.5)*0.25))},
+  espada:     {dmg:40, cd:30, speed:0,  color:'#ff00ff',   fire:p=>{
+    effects.push({x:p.x,y:p.y,life:25,angle:0});
+    const other = p.id==='p1'?p2:p1;
+    if(Math.hypot(p.x-other.x,p.y-other.y)<60) other.health -=40;
+  }}
+};
+function bullet(p,spread=0){
+  const w=weapons[p.weapon];
+  const a=p.angle+spread;
+  return {x:p.x+Math.cos(a)*45,y:p.y+Math.sin(a)*45,vx:Math.cos(a)*w.speed,vy:Math.sin(a)*w.speed,color:w.color,dmg:w.dmg,owner:p.id};
+}
+
+// ==================== CLASSES (seu original 100%) ====================
+class Player{
+  constructor(x,color,controls,id){
+    this.x=x;this.y=canvas.height/2;this.color=color;this.controls=controls;this.id=id;
+    this.health=100;this.weapon=save[id].weapon;this.coins=save[id].coins;
+    this.angle=0;this.cd=0;this.dashCd=0;
+  }
+  update(){
+    const k=keys;
+    if(k[this.controls.up])    this.y-=5;
+    if(k[this.controls.down])  this.y+=5;
+    if(k[this.controls.left])  this.x-=5;
+    if(k[this.controls.right]) this.x+=5;
+    this.x=Math.max(30,Math.min(canvas.width-30,this.x));
+    this.y=Math.max(30,Math.min(canvas.height-30,this.y));
+    const target=this.id==='p1'?p2:p1;
+    this.angle=Math.atan2(target.y-this.y,target.x-this.x);
+    if(this.cd>0)this.cd--;
+    if(this.dashCd>0)this.dashCd--;
+    if(k[this.controls.shoot] && this.cd<=0) this.shoot();
+  }
+  shoot(){
+    weapons[this.weapon].fire(this);
+    this.cd=weapons[this.weapon].cd;
+  }
+  draw(){
+    ctx.save();
+    ctx.translate(this.x,this.y);
+    ctx.rotate(this.angle);
+    ctx.fillStyle=this.color;
+    ctx.fillRect(-20,-20,40,40);
+    ctx.fillStyle='#333';
+    ctx.fillRect(15,-8,30,16);
+    ctx.restore();
+    ctx.fillStyle='white';
+    ctx.font='12px Arial';
+    ctx.fillText(this.weapon.toUpperCase(),this.x-40,this.y-30);
+  }
+}
+
+// ==================== JOGADORES ====================
+const p1 = new Player(150,'#00ff00',{up:'w',down:'s',left:'a',right:'d',shoot:' '},'p1');
+const p2 = new Player(canvas.width-150,'#ff0066',{up:'ArrowUp',down:'ArrowDown',left:'ArrowLeft',right:'ArrowRight',shoot:'Enter'},'p2');
+let bullets=[], effects=[], keys={}, gameOver=false, gameState='countdown', startTime=0;
+
+// DASH FUNCTION (seu original)
+function doDash(player){
+  const dashDist=200;
+  player.x += Math.cos(player.angle)*dashDist;
+  player.y += Math.sin(player.angle)*dashDist;
+  player.x=Math.max(30,Math.min(canvas.width-30,player.x));
+  player.y=Math.max(30,Math.min(canvas.height-30,player.y));
+  weapons.espada.fire(player);
+  player.dashCd=300;
+}
+
+// ==================== LOJA (seu original 100%) ====================
+let shopOpen=false, currentShopPlayer=null;
+const overlay=document.getElementById('shop-overlay'), shopTitle=document.getElementById('shop-title'), playerCoinsShop=document.getElementById('player-coins');
+function openShop(id){
+  if(gameState!=='playing' || shopOpen)return;
+  currentShopPlayer=id;shopOpen=true;
+  shopTitle.textContent=`LOJA DO ${id==='p1'?'JOGADOR 1':'JOGADOR 2'}`;
+  const player=id==='p1'?p1:p2;
+  playerCoinsShop.textContent=`${player.coins} moedas`;
+  overlay.style.display='flex';
+  updateShopUI(id);
+}
+function closeShop(){shopOpen=false;overlay.style.display='none';currentShopPlayer=null;}
+function updateShopUI(id){
+  const player=id==='p1'?p1:p2, prices={pistol:0,shotgun:150,machinegun:300,espada:100};
+  document.querySelectorAll('.weapon').forEach(div=>{
+    const w=div.dataset.w, priceSpan=div.querySelector('.price');
+    if(player.weapon===w){priceSpan.textContent='EQUIPADO ✓';priceSpan.style.color='#0f0';}
+    else if(save[id].owned.includes(w)){priceSpan.textContent='SELECIONAR';priceSpan.style.color='#0ff';}
+    else{priceSpan.textContent=prices[w]+' moedas';priceSpan.style.color='gold';}
+  });
+}
+function buy(num){
+  if(!currentShopPlayer)return;
+  const map={'1':'pistol','2':'shotgun','3':'machinegun','4':'espada'}, prices={pistol:0,shotgun:150,machinegun:300,espada:100}, w=map[num], id=currentShopPlayer, player=id==='p1'?p1:p2;
+  if(save[id].owned.includes(w)){player.weapon=w;save[id].weapon=w;}
+  else{const price=prices[w];if(player.coins<price)return;player.coins-=price;save[id].coins=player.coins;save[id].owned.push(w);player.weapon=w;save[id].weapon=w;playerCoinsShop.textContent=player.coins+' moedas';}
+  localStorage.setItem('arena2d',JSON.stringify(save));updateShopUI(id);updateHUD();
+}
+
+// ==================== CONTROLES (seu original + sync) ====================
+let lastInputTime = 0;
+onkeydown=e=>{
+  e.preventDefault();
+  keys[e.key.toLowerCase()]=true;keys[e.key]=true;
+  if(gameStarted && gameState==='playing' && !gameOver && !shopOpen){
+    if(e.key.toLowerCase()==='c' && p1.weapon==='espada' && p1.dashCd<=0) doDash(p1);
+    if(e.key.toLowerCase()==='l' && p2.weapon==='espada' && p2.dashCd<=0) doDash(p2);
+  }
+  if(e.key.toLowerCase()==='f') openShop('p1');
+  if(e.key.toLowerCase()==='g') openShop('p2');
+  if(e.key==='Escape') closeShop();
+  if(shopOpen && '1234'.includes(e.key)) buy(e.key);
+
+  // Sync input
+  const now = Date.now();
+  if (now - lastInputTime > 50) { // Throttle 50ms
+    socket.emit('playerInput', {keys});
+    lastInputTime = now;
+  }
+};
+onkeyup=e=>{keys[e.key.toLowerCase()]=false;keys[e.key]=false;};
+
+// Recebe input oponente e atualiza p2
+socket.on('opponentInput', data => {
+  // Simula controles do oponente em p2
+  const k = data.keys;
+  if(k.w || k.ArrowUp) p2.y -= 5;
+  if(k.s || k.ArrowDown) p2.y += 5;
+  if(k.a || k.ArrowLeft) p2.x -= 5;
+  if(k.d || k.ArrowRight) p2.x += 5;
+  p2.x = Math.max(30, Math.min(canvas.width-30, p2.x));
+  p2.y = Math.max(30, Math.min(canvas.height-30, p2.y));
+  if ((k[' '] || k.Enter) && p2.cd <= 0) p2.shoot();
+});
+
+// Sync full estado (balas, efeitos, health, etc.)
+function enviarEstado() {
+  if (!gameStarted) return;
+  socket.emit('gameState', {
+    p1: {x: p1.x, y: p1.y, angle: p1.angle, health: p1.health, weapon: p1.weapon, coins: p1.coins, cd: p1.cd, dashCd: p1.dashCd},
+    p2: {x: p2.x, y: p2.y, angle: p2.angle, health: p2.health, weapon: p2.weapon, coins: p2.coins, cd: p2.cd, dashCd: p2.dashCd},
+    bullets: bullets.map(b => ({x: b.x, y: b.y, vx: b.vx, vy: b.vy, color: b.color, dmg: b.dmg, owner: b.owner})),
+    effects: effects.map(e => ({x: e.x, y: e.y, life: e.life, angle: e.angle}))
+  });
+}
+
+socket.on('syncGameState', data => {
+  if (!gameStarted) return;
+  // Atualiza oponente (p2 se você é p1, vice-versa - mas como p1 local, ajusta p2)
+  p2.x = data.p2.x; p2.y = data.p2.y; p2.angle = data.p2.angle;
+  p2.health = data.p2.health; p2.weapon = data.p2.weapon; p2.coins = data.p2.coins;
+  p2.cd = data.p2.cd; p2.dashCd = data.p2.dashCd;
+
+  // Sync balas (filtra e adiciona do oponente)
+  bullets = bullets.filter(b => b.owner === 'p1'); // Mantém só suas
+  data.bullets.filter(b => b.owner === 'p2').forEach(b => bullets.push({...b}));
+
+  // Sync efeitos
+  effects = data.effects.filter(e => !e.owner || e.owner === 'p2'); // Adiciona do oponente
+});
+
+// ==================== HUD (seu original) ====================
+function updateHUD(){
+  document.getElementById('h1').style.width=p1.health+'%';
+  document.getElementById('h2').style.width=p2.health+'%';
+  document.getElementById('c1').textContent=p1.coins+' moedas';
+  document.getElementById('c2').textContent=p2.coins+' moedas';
+}
+
+// ==================== RESET (seu original) ====================
+function reset(){
+  p1.health=p2.health=100;p1.dashCd=p2.dashCd=0;
+  p1.x=150;p2.x=canvas.width-150;p1.y=p2.y=canvas.height/2;
+  bullets=[];effects=[];gameOver=false;gameState='countdown';startTime=Date.now()+3000;
+}
+
+// ==================== LOOP (seu original 100% + sync) ====================
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight;}
-resize(); window.addEventListener('resize',resize);
+resize();
+window.addEventListener('resize',resize);
 
-let me = null, enemy = null;
-let bullets = [], effects = [];
-let keys = {};
-let shopOpen = false;
-
-// Armas (igual)
-const weapons = { /* ... cole aqui exatamente o objeto weapons do seu jogo anterior ... */ };
-
-// Player class (só posição, arma, vida)
-class Player {
-  constructor(isMe) {
-    this.isMe = isMe;
-    this.x = isMe ? 150 : canvas.width-150;
-    this.y = canvas.height/2;
-    this.health = 100;
-    this.weapon = 'pistol';
-    this.coins = 0;
-    this.angle = 0;
-    this.cd = 0;
-    this.dashCd = 0;
-  }
-  draw() {
-    ctx.save();
-    ctx.translate(this.x, this.y);
-    ctx.rotate(this.angle);
-    ctx.fillStyle = this.isMe ? '#00ff00' : '#ff0066';
-    ctx.fillRect(-20,-20,40,40);
-    ctx.fillStyle = '#333';
-    ctx.fillRect(15,-8,30,16);
-    ctx.restore();
-  }
-}
-
-function initGame() {
-  me = new Player(true);
-  enemy = new Player(false);
-  requestAnimationFrame(loop);
-}
-
-// Controles locais → envia pro servidor
-onkeydown = onkeyup = e => {
-  const key = e.key.toLowerCase();
-  keys[key] = e.type === 'keydown';
-  if (e.type === 'keydown') {
-    if (key === 'f') openShop();
-    if (key === 'c' && me.weapon === 'espada' && me.dashCd <= 0) doDash();
-  }
-  socket.emit('playerInput', { keys, mouseX: enemy.x, mouseY: enemy.y });
-};
-
-// Recebe input do oponente
-socket.on('opponentInput', data => {
-  if (!enemy) return;
-  enemy.angle = Math.atan2(data.mouseY - enemy.y, data.mouseX - enemy.x);
-  // Simula movimento do inimigo (você pode melhorar com interpolação)
-  if (data.keys.w || data.keys.ArrowUp) enemy.y -= 5;
-  if (data.keys.s || data.keys.ArrowDown) enemy.y += 5;
-  if (data.keys.a || data.keys.ArrowLeft) enemy.x -= 5;
-  if (data.keys.d || data.keys.ArrowRight) enemy.x += 5;
-  enemy.x = Math.max(30, Math.min(canvas.width-30, enemy.x));
-  enemy.y = Math.max(30, Math.min(canvas.height-30, enemy.y));
-});
-
-function doDash() {
-  const dist = 200;
-  me.x += Math.cos(me.angle) * dist;
-  me.y += Math.sin(me.angle) * dist;
-  me.dashCd = 300;
-  weapons.espada.fire(me);
-  socket.emit('gameState', { type: 'dash', player: 'me' });
-}
-
-// Loop principal (quase igual ao seu)
-function loop() {
+function loop(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  
-  if (me && enemy) {
-    me.angle = Math.atan2(enemy.y - me.y, enemy.x - me.x);
-    
-    // Movimento local
-    if (keys.w || keys.ArrowUp) me.y -= 5;
-    if (keys.s || keys.ArrowDown) me.y += 5;
-    if (keys.a || keys.ArrowLeft) me.x -= 5;
-    if (keys.d || keys.ArrowRight) me.x += 5;
-    me.x = Math.max(30, Math.min(canvas.width-30, me.x));
-    me.y = Math.max(30, Math.min(canvas.height-30, me.y));
-
-    // Tiro local
-    if (keys[' '] || keys.Enter) {
-      if (me.cd <= 0) {
-        weapons[me.weapon].fire(me);
-        me.cd = weapons[me.weapon].cd;
-      }
+  const now=Date.now();
+  if(gameState==='countdown'){
+    let timeLeft=(startTime-now)/1000;
+    if(timeLeft<=0){gameState='playing';p1.cd=weapons[p1.weapon].cd;p2.cd=weapons[p2.weapon].cd;}
+    else{
+      ctx.fillStyle='rgba(0,0,0,0.8)';ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle='white';ctx.font='bold 200px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+      ctx.fillText(Math.ceil(timeLeft),canvas.width/2,canvas.height/2);ctx.textAlign='left';ctx.textBaseline='alphabetic';
     }
-    if (me.cd > 0) me.cd--;
+  }else if(!gameOver){
+    p1.update();p2.update();p1.draw();p2.draw();
 
-    me.draw();
-    enemy.draw();
+    // EFEITOS ESPADA (seu original)
+    for(let i=effects.length-1;i>=0;i--){
+      let e=effects[i];e.life--;if(e.life<=0){effects.splice(i,1);continue;}
+      e.angle+=0.4;ctx.save();ctx.translate(e.x,e.y);ctx.rotate(e.angle);
+      ctx.strokeStyle=`hsla(300,100%,60%,${e.life/25})`;ctx.lineWidth=10*(e.life/25);ctx.lineCap='round';
+      ctx.beginPath();ctx.arc(0,0,45,0,Math.PI*2);ctx.stroke();ctx.restore();
+    }
 
-    // Balas e efeitos (igual ao seu código)
-    // ... (cole aqui toda a parte de bullets e effects do seu jogo original)
+    // DASH COOLDOWN UI (seu original)
+    const dashUI=(player,sx)=>{
+      if(player.weapon!=='espada')return;
+      const maxCd=300, prog=Math.max(0,player.dashCd/maxCd), sy=canvas.height-80, w=35, h=35;
+      ctx.fillStyle='rgba(0,0,0,0.8)';ctx.fillRect(sx,sy,w,h);
+      ctx.strokeStyle='#ff00ff';ctx.lineWidth=2;ctx.strokeRect(sx,sy,w,h);
+      ctx.fillStyle='#ff00ff';ctx.fillRect(sx+2,sy+h-prog*h-2,w-4,prog*h);
+      if(prog===0){ctx.fillStyle='#00ff00';ctx.fillRect(sx+2,sy+h-5,w-4,5);}
+    };
+    dashUI(p1,20);dashUI(p2,canvas.width-55);
+
+    // BALAS (seu original)
+    for(let i=bullets.length-1;i>=0;i--){
+      const b=bullets[i];b.x+=b.vx;b.y+=b.vy;
+      if(b.x<0||b.x>canvas.width||b.y<0||b.y>canvas.height){bullets.splice(i,1);continue;}
+      ctx.fillStyle=b.color;ctx.fillRect(b.x-4,b.y-4,8,8);
+      if(Math.hypot(b.x-p1.x,b.y-p1.y)<28 && b.owner!=='p1'){p1.health-=b.dmg;bullets.splice(i,1);}
+      else if(Math.hypot(b.x-p2.x,b.y-p2.y)<28 && b.owner!=='p2'){p2.health-=b.dmg;bullets.splice(i,1);}
+    }
+
+    if(p1.health<=0||p2.health<=0){
+      gameOver=true;const winner=p1.health>0?p1:p2;winner.coins+=100;save[winner.id].coins=winner.coins;
+      localStorage.setItem('arena2d',JSON.stringify(save));
+      setTimeout(()=>{alert(`${winner.id==='p1'?'Jogador 1':'Jogador 2'} VENCEU!\n+100 moedas`);reset();},200);
+    }
+
+    // Sync a cada frame (mas throttle no server se preciso)
+    enviarEstado();
   }
-
-  requestAnimationFrame(loop);
+  updateHUD();requestAnimationFrame(loop);
 }
 
-// Loja simplificada (só local por enquanto, mas funciona)
-function openShop() {
-  // ... sua loja original ...
-}
-</script>
+// Inicia loop só após startGame
 </script>
 </body>
 </html>
