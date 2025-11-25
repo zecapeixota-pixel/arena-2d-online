@@ -8,62 +8,53 @@ const server = http.createServer(app);
 const io = socketIO(server, { cors: { origin: "*" } });
 
 app.use(express.static(path.join(__dirname)));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// Sistema de salas (igual ao que mandei antes)
 const rooms = new Map();
+
 function generateCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code;
   do {
-    code = '';
-    for (let i = 0; i < 5; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    code = Array.from({length:5}, () => chars[Math.floor(Math.random()*chars.length)]).join('');
   } while (rooms.has(code));
   return code;
 }
 
-io.on('connection', socket => {
-  console.log('Jogador conectado:', socket.id);
+io.on('connection', (socket) => {
+  console.log('Conectado:', socket.id);
 
   socket.on('createRoom', () => {
     const code = generateCode();
-    rooms.set(code, { players: [socket.id], p1: null, p2: null, gameData: null });
+    rooms.set(code, {p1: socket.id, p2: null});
     socket.join(code);
     socket.emit('roomCreated', code);
+    console.log(`Sala ${code} criada`);
   });
 
   socket.on('joinRoom', (code) => {
     code = code.toUpperCase();
     const room = rooms.get(code);
     if (!room) return socket.emit('error', 'Sala não existe');
-    if (room.players.length >= 2) return socket.emit('error', 'Sala cheia');
-    
-    room.players.push(socket.id);
+    if (room.p2) return socket.emit('error', 'Sala cheia');
+
+    room.p2 = socket.id;
     socket.join(code);
-    
-    if (room.players.length === 1) {
-      room.p1 = socket.id;
-      socket.emit('waiting');
-    } else {
-      room.p2 = socket.id;
-      io.to(code).emit('startGame', { p1: room.p1, p2: room.p2 });
-    }
+    io.to(code).emit('startGame', {p1Id: room.p1, p2Id: room.p2});
+    io.to(code).emit('startCountdown');
+    console.log(`Jogo iniciado em ${code}`);
   });
 
-  socket.on('playerInput', (data) => {
-    socket.to(Array.from(socket.rooms)[1]).emit('opponentInput', data);
+  socket.on('playerState', (data) => {
+    const roomName = Array.from(socket.rooms).find(r => r !== socket.id);
+    if (roomName) socket.to(roomName).emit('opponentState', data);
   });
 
   socket.on('disconnect', () => {
-    for (const [code, room] of rooms) {
-      const index = room.players.indexOf(socket.id);
-      if (index !== -1) {
-        room.players.splice(index, 1);
+    for (const [code, room] of rooms.entries()) {
+      if (room.p1 === socket.id || room.p2 === socket.id) {
         io.to(code).emit('opponentLeft');
-        if (room.players.length === 0) rooms.delete(code);
+        rooms.delete(code);
         break;
       }
     }
@@ -71,4 +62,4 @@ io.on('connection', socket => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Servidor na porta ${PORT}`));
+server.listen(PORT, () => console.log(`Servidor em ${PORT}`));
